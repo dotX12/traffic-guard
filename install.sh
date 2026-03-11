@@ -13,6 +13,7 @@ REPO="dotX12/traffic-guard"
 BINARY_NAME="traffic-guard"
 INSTALL_DIR="/usr/local/bin"
 LATEST_RELEASE_URL="https://github.com/${REPO}/releases/latest/download"
+DEV_MODE=false
 
 # Функция для вывода сообщений
 log_info() {
@@ -74,11 +75,48 @@ detect_system() {
     echo "${os}-${arch}"
 }
 
+# Получение последнего релиза (включая pre-release если --dev)
+get_latest_release_tag() {
+    local api_url="https://api.github.com/repos/${REPO}/releases"
+
+    if [ "$DEV_MODE" = true ]; then
+        log_info "Режим DEV: поиск последнего релиза (включая pre-release)..."
+        api_url="${api_url}?per_page=1"
+    else
+        api_url="${api_url}/latest"
+    fi
+
+    local tag=""
+    if command -v curl &> /dev/null; then
+        tag=$(curl -fsSL "${api_url}" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/"tag_name": *"\(.*\)"/\1/')
+    elif command -v wget &> /dev/null; then
+        tag=$(wget -qO- "${api_url}" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/"tag_name": *"\(.*\)"/\1/')
+    else
+        log_error "Не найден curl или wget. Установите один из них"
+        exit 1
+    fi
+
+    if [ -z "$tag" ]; then
+        log_error "Не удалось определить версию релиза"
+        exit 1
+    fi
+
+    echo "$tag"
+}
+
 # Скачивание бинарника
 download_binary() {
     local platform=$1
-    local download_url="${LATEST_RELEASE_URL}/${BINARY_NAME}-${platform}"
     local temp_file="/tmp/${BINARY_NAME}"
+    local download_url=""
+
+    if [ "$DEV_MODE" = true ]; then
+        local tag=$(get_latest_release_tag)
+        log_info "Найдена версия: ${tag}"
+        download_url="https://github.com/${REPO}/releases/download/${tag}/${BINARY_NAME}-${platform}"
+    else
+        download_url="${LATEST_RELEASE_URL}/${BINARY_NAME}-${platform}"
+    fi
 
     log_info "Скачивание ${BINARY_NAME} для ${platform}..."
     log_info "URL: ${download_url}"
@@ -150,9 +188,46 @@ show_usage() {
     echo "" >&2
 }
 
+# Вывод справки
+show_help() {
+    echo "Использование: $0 [OPTIONS]" >&2
+    echo "" >&2
+    echo "Опции:" >&2
+    echo "  --dev       Установить последний релиз (включая pre-release)" >&2
+    echo "  --help      Показать эту справку" >&2
+    echo "" >&2
+    exit 0
+}
+
+# Парсинг аргументов
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --dev)
+                DEV_MODE=true
+                shift
+                ;;
+            --help|-h)
+                show_help
+                ;;
+            *)
+                log_error "Неизвестный параметр: $1"
+                echo "Используйте --help для справки" >&2
+                exit 1
+                ;;
+        esac
+    done
+}
+
 # Главная функция
 main() {
+    # Парсинг аргументов
+    parse_args "$@"
+
     log_info "=== Установка Traffic Guard ==="
+    if [ "$DEV_MODE" = true ]; then
+        log_warn "Режим DEV: будет установлена последняя версия (включая pre-release)"
+    fi
     echo "" >&2
 
     # Проверка прав
