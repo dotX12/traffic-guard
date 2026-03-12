@@ -299,13 +299,13 @@ func (s *IptablesService) saveWithUFW() error {
 
 	logRuleV4 := ""
 	if s.enableLogging {
-		logRuleV4 = strings.Join(NewRuleBuilder().
+		logRuleV4 = fmt.Sprintf("-A %s %s\n", chainName, strings.Join(NewRuleBuilder().
 			MatchSet(ipsetV4Name, "src").
 			MatchLimit("10/min", "5").
 			Jump(TargetLog).
-			LogPrefix("ANTISCAN-v4: ").
+			LogPrefix("\"ANTISCAN-v4: \"").
 			LogLevel("4").
-			Build(), " ") + "\n"
+			Build(), " "))
 	}
 
 	dropRuleV4 := strings.Join(NewRuleBuilder().
@@ -319,7 +319,8 @@ func (s *IptablesService) saveWithUFW() error {
 :%s - [0:0]
 -A ufw-before-input -j %s
 -A %s %s
-%s-A %s %s
+%s
+-A %s %s
 # END SCANNERS-BLOCK
 
 `, chainName, chainName, chainName, establishedRuleV4, logRuleV4, chainName, dropRuleV4)
@@ -354,13 +355,13 @@ func (s *IptablesService) saveWithUFW() error {
 
 		logRuleV6 := ""
 		if s.enableLogging {
-			logRuleV6 = strings.Join(NewRuleBuilder().
+			logRuleV6 = fmt.Sprintf("-A %s %s\n", chainName, strings.Join(NewRuleBuilder().
 				MatchSet(ipsetV6Name, "src").
 				MatchLimit("10/min", "5").
 				Jump(TargetLog).
-				LogPrefix("ANTISCAN-v6: ").
+				LogPrefix("\"ANTISCAN-v6: \"").
 				LogLevel("4").
-				Build(), " ") + "\n"
+				Build(), " "))
 		}
 
 		dropRuleV6 := strings.Join(NewRuleBuilder().
@@ -374,7 +375,8 @@ func (s *IptablesService) saveWithUFW() error {
 :%s - [0:0]
 -A ufw6-before-input -j %s
 -A %s %s
-%s-A %s %s
+%s
+-A %s %s
 # END SCANNERS-BLOCK
 
 `, chainName, chainName, chainName, establishedRuleV6, logRuleV6, chainName, dropRuleV6)
