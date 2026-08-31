@@ -157,8 +157,20 @@ func (s *UninstallerService) removeManagedUFWBlock(path string) (bool, error) {
 		}
 
 		end := start + endRel + len(ufwManagedBlockEnd)
+
+		// Skip trailing newlines
 		for end < len(updated) && (updated[end] == '\n' || updated[end] == '\r') {
 			end++
+		}
+
+		// Remove one leading newline if exists
+		if start > 0 && updated[start-1] == '\n' {
+			start--
+			if start > 0 && updated[start-1] == '\r' {
+				start--
+			}
+		} else if start > 0 && updated[start-1] == '\r' {
+			start--
 		}
 
 		updated = updated[:start] + updated[end:]
@@ -203,6 +215,7 @@ func (s *UninstallerService) cleanupIPSet() {
 
 func (s *UninstallerService) removeArtifacts(removeLogs bool) {
 	paths := []string{
+		"/usr/local/bin/traffic-guard",
 		IpsetRestoreServicePath,
 		MoveRulesServicePath,
 		AggregateLogsServicePath,

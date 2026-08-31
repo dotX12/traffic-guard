@@ -9,7 +9,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Константы
-REPO="dotX12/traffic-guard"
+REPO="Winterstarf/traffic-guard"
 BINARY_NAME="traffic-guard"
 INSTALL_DIR="/usr/local/bin"
 LATEST_RELEASE_URL="https://github.com/${REPO}/releases/latest/download"
@@ -33,6 +33,54 @@ check_root() {
     if [ "$EUID" -ne 0 ]; then
         log_error "Необходимо запустить скрипт с правами root (sudo)"
         exit 1
+    fi
+}
+
+# Проверка и установка rsyslog
+ensure_rsyslog() {
+    log_info "Проверка наличия rsyslog..."
+    
+    # Проверяем, установлен ли rsyslog в системе
+    if command -v rsyslogd &> /dev/null; then
+        log_info "✓ rsyslog уже установлен"
+        return 0
+    fi
+
+    log_warn "Служба rsyslog не найдена в системе"
+
+    # Проверяем поддержку apt
+    if command -v apt-get &> /dev/null; then
+        log_info "Обнаружен менеджер пакетов apt. Установка rsyslog..."
+        apt-get update -qq
+        if apt-get install -y rsyslog; then
+            log_info "✓ rsyslog успешно установлен"
+        else
+            log_error "Не удалось установить rsyslog через apt"
+            exit 1
+        fi
+    else
+        # Если apt не поддерживается
+        log_warn "Внимание: эта система не поддерживает apt, и rsyslog отсутствует"
+        log_warn "Без rsyslog функции логирования правил iptables не будет работать"
+        echo "" >&2
+        
+        while true; do
+            echo -n -e "${YELLOW}[PROMPT] Продолжить установку без rsyslog? [y/N]: ${NC}" >&2
+            read -r response
+            case "$response" in
+                [yY][eE][sS]|[yY])
+                    log_info "Продолжение установки..."
+                    break
+                    ;;
+                [nN][oO]|[nN])
+                    log_error "Установка прервана"
+                    exit 1
+                    ;;
+                *)
+                    echo "Введите 'y' (да) или 'N' (нет)" >&2
+                    ;;
+            esac
+        done
     fi
 }
 
@@ -232,6 +280,9 @@ main() {
 
     # Проверка прав
     check_root
+
+    # Проверка зависимостей логирования
+    ensure_rsyslog
 
     # Определение системы
     local platform=$(detect_system)

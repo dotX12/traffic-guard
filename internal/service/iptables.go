@@ -165,9 +165,20 @@ func (s *IptablesService) removeManagedBlock(content, startMarker string) string
 		}
 
 		end := start + endRel + len(endMarker)
+		
 		// Skip trailing newlines
 		for end < len(content) && (content[end] == '\n' || content[end] == '\r') {
 			end++
+		}
+
+		// Remove one leading newline if exists
+		if start > 0 && content[start-1] == '\n' {
+			start--
+			if start > 0 && content[start-1] == '\r' {
+				start--
+			}
+		} else if start > 0 && content[start-1] == '\r' {
+			start--
 		}
 
 		content = content[:start] + content[end:]
@@ -262,9 +273,6 @@ func (s *IptablesService) saveWithUFW() error {
 		s.logger.Info().Msg("✓ Правило SSH найдено в конфигурации UFW")
 	}
 
-	// UFW сохраняет правила автоматически
-	// Нужно только добавить наши правила в before.rules
-
 	beforeRulesV4 := "/etc/ufw/before.rules"
 	beforeRulesV6 := "/etc/ufw/before6.rules"
 
@@ -279,18 +287,16 @@ func (s *IptablesService) saveWithUFW() error {
 		s.logger.Warn().Err(err).Msg("Не удалось прочитать UFW before6.rules")
 	}
 
-	// Проверяем есть ли уже наша цепочка
 	markerV4 := "# SCANNERS-BLOCK chain - managed by antiscan"
 	markerV6 := "# SCANNERS-BLOCK chain - managed by antiscan"
 
-	// Удаляем старый managed блок если существует (для поддержки обновлений)
+	// Удаляем старый managed блок если существует
 	contentV4Str := string(contentV4)
 	if strings.Contains(contentV4Str, markerV4) {
 		s.logger.Info().Msg("Обнаружен существующий блок SCANNERS-BLOCK в before.rules, обновляем...")
 		contentV4Str = s.removeManagedBlock(contentV4Str, markerV4)
 	}
 
-	// Добавляем наши правила в before.rules (внутри существующей секции *filter)
 	// Генерируем правила используя RuleBuilder
 	establishedRuleV4 := strings.Join(NewRuleBuilder().
 		MatchConntrack("ESTABLISHED", "RELATED").
@@ -325,12 +331,19 @@ func (s *IptablesService) saveWithUFW() error {
 
 `, chainName, chainName, chainName, establishedRuleV4, logRuleV4, chainName, dropRuleV4)
 
-	// Вставляем перед последним COMMIT в конце *filter секции
-	lastCommit := strings.LastIndex(contentV4Str, "COMMIT\n")
-	if lastCommit == -1 {
-		return fmt.Errorf("no COMMIT found in before.rules")
+	// Находим секцию *filter (по умолчанию в UFW перед первым COMMIT)
+	filterIdxV4 := strings.Index(contentV4Str, "*filter")
+	if filterIdxV4 == -1 {
+		filterIdxV4 = 0
 	}
-	newContent := contentV4Str[:lastCommit] + rulesV4 + contentV4Str[lastCommit:]
+
+	filterCommitRelV4 := strings.Index(contentV4Str[filterIdxV4:], "COMMIT\n")
+	if filterCommitRelV4 == -1 {
+		return fmt.Errorf("no COMMIT found in *filter section of before.rules")
+	}
+	filterCommitPosV4 := filterIdxV4 + filterCommitRelV4
+
+	newContent := contentV4Str[:filterCommitPosV4] + rulesV4 + contentV4Str[filterCommitPosV4:]
 	if err := os.WriteFile(beforeRulesV4+".new", []byte(newContent), 0640); err != nil {
 		return fmt.Errorf("failed to write UFW rules: %w", err)
 	}
@@ -340,14 +353,12 @@ func (s *IptablesService) saveWithUFW() error {
 	s.logger.Info().Msg("Обновлён UFW before.rules для IPv4")
 
 	if contentV6 != nil {
-		// Удаляем старый managed блок если существует (для поддержки обновлений)
 		contentV6Str := string(contentV6)
 		if strings.Contains(contentV6Str, markerV6) {
 			s.logger.Info().Msg("Обнаружен существующий блок SCANNERS-BLOCK в before6.rules, обновляем...")
 			contentV6Str = s.removeManagedBlock(contentV6Str, markerV6)
 		}
 
-		// Генерируем правила используя RuleBuilder
 		establishedRuleV6 := strings.Join(NewRuleBuilder().
 			MatchConntrack("ESTABLISHED", "RELATED").
 			Jump(TargetReturn).
@@ -381,12 +392,19 @@ func (s *IptablesService) saveWithUFW() error {
 
 `, chainName, chainName, chainName, establishedRuleV6, logRuleV6, chainName, dropRuleV6)
 
-		lastCommit := strings.LastIndex(contentV6Str, "COMMIT\n")
-		if lastCommit == -1 {
-			s.logger.Warn().Msg("COMMIT не найден в before6.rules")
+		// Находим секцию *filter для IPv6
+		filterIdxV6 := strings.Index(contentV6Str, "*filter")
+		if filterIdxV6 == -1 {
+			filterIdxV6 = 0
+		}
+
+		filterCommitRelV6 := strings.Index(contentV6Str[filterIdxV6:], "COMMIT\n")
+		if filterCommitRelV6 == -1 {
+			s.logger.Warn().Msg("COMMIT не найден в *filter секции before6.rules")
 		} else {
-			newContent := contentV6Str[:lastCommit] + rulesV6 + contentV6Str[lastCommit:]
-			if err := os.WriteFile(beforeRulesV6+".new", []byte(newContent), 0640); err != nil {
+			filterCommitPosV6 := filterIdxV6 + filterCommitRelV6
+			newContentV6 := contentV6Str[:filterCommitPosV6] + rulesV6 + contentV6Str[filterCommitPosV6:]
+			if err := os.WriteFile(beforeRulesV6+".new", []byte(newContentV6), 0640); err != nil {
 				s.logger.Warn().Err(err).Msg("Не удалось записать UFW правила для IPv6")
 			} else {
 				if err := os.Rename(beforeRulesV6+".new", beforeRulesV6); err != nil {
@@ -398,8 +416,6 @@ func (s *IptablesService) saveWithUFW() error {
 		}
 	}
 
-	// Перезагружаем UFW (используем disable+enable так как reload не всегда работает)
-	// UFW загрузит правила из before.rules автоматически
 	if !wasActive {
 		s.logger.Warn().Msg("⚠️  UFW был неактивен - включаем его сейчас (SSH проверен)")
 	}
@@ -414,23 +430,18 @@ func (s *IptablesService) saveWithUFW() error {
 		s.logger.Info().Msg("✓ UFW успешно активирован с правилами SSH")
 	}
 
-	// Перемещаем SCANNERS-BLOCK в начало ufw-before-input (позиция 1)
-	// Это необходимо чтобы блокировка срабатывала ДО правил ACCEPT для ICMP и ESTABLISHED
 	s.logger.Info().Msg("Перемещение SCANNERS-BLOCK на позицию 1 в ufw-before-input")
 
-	// Удаляем правило из текущей позиции (оно добавлено из before.rules)
 	if err := s.cmdSvc.Run("iptables", "-D", "ufw-before-input", "-j", chainName); err != nil {
 		s.logger.Warn().Err(err).Msg("Не удалось удалить SCANNERS-BLOCK из ufw-before-input")
 	}
 
-	// Вставляем в позицию 1 (самое начало)
 	if err := s.cmdSvc.Run("iptables", "-I", "ufw-before-input", "1", "-j", chainName); err != nil {
 		s.logger.Warn().Err(err).Msg("Не удалось вставить SCANNERS-BLOCK на позицию 1 (IPv4)")
 	} else {
 		s.logger.Info().Msg("SCANNERS-BLOCK перемещён на позицию 1 в ufw-before-input (IPv4)")
 	}
 
-	// То же самое для IPv6
 	if err := s.cmdSvc.Run("ip6tables", "-D", "ufw6-before-input", "-j", chainName); err != nil {
 		s.logger.Warn().Err(err).Msg("Не удалось удалить SCANNERS-BLOCK из ufw6-before-input")
 	}
@@ -441,7 +452,6 @@ func (s *IptablesService) saveWithUFW() error {
 		s.logger.Info().Msg("SCANNERS-BLOCK перемещён на позицию 1 в ufw6-before-input (IPv6)")
 	}
 
-	// Create systemd service to move rules after UFW starts
 	if err := s.createMoveRuleService(); err != nil {
 		s.logger.Warn().Err(err).Msg("Не удалось создать systemd сервис для перемещения правил")
 	}
