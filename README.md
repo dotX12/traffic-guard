@@ -273,7 +273,7 @@ sudo traffic-guard full \
 
 Доступные списки:
 
-- `public/antiscanner.list` - список от **[zakachkin/AntiScanner](https://github.com/zakachkin/AntiScanner)**
+- `public/antiscanner.list` - список от **[sngvy/AntiScanner](https://github.com/sngvy/AntiScanner)**
 - `public/government_networks.list` - подсети различных сканеров государственных организаций
 
 ### Примеры использования
